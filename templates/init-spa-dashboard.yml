@@ -1,0 +1,41 @@
+# qa-pro config — SPA dashboard (numbers, charts, KPIs)
+name: REPLACE_ME
+project_type: spa-dashboard
+test_url: REPLACE_ME
+
+pages:
+  - /
+  # add dashboard pages here
+
+viewports:
+  - desktop
+  - mobile
+
+a11y_rules: wcag22aa
+visual_diff: true
+
+# Data correctness — fill if you have a source-of-truth
+data_adapter: jsonfile  # or 'rest' or 'none'
+data_source:
+  path: data/expected_values.json
+  pin_to: git_head
+  refuse_dirty_working_tree: true
+
+kpis: []
+# Example KPI:
+# - name: total_volume
+#   page: /enablement
+#   selector: '[data-kpi="total-volume"]'
+#   expected_path: $.total_volume_usd  # JSONPath into data_source
+#   tolerance: 0.005
+
+monthly_token_cap: 2000000
+per_run_token_cap: 500000
+vision_call_cap_per_full: 30
+
+masking:
+  - selector: "[data-qa-mask]"
+  - selector: "time, [datetime]"
+  - selector: ".chart-tooltip"
+
+report_dir: .qa/reports

@@ -1,0 +1,11 @@
+{
+  "name": "qa-pro-skill",
+  "version": "1.3.0",
+  "description": "qa-pro skill helper deps (do not edit manually; use scripts/install-deps.sh)",
+  "private": true,
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "playwright": "^1.48.0",
+    "@axe-core/playwright": "^4.10.0"
+  }
+}

@@ -1,0 +1,28 @@
+# qa-pro config — custom (anything not covered by other templates)
+# WARNING: with no critical flows or data adapter, this suite only validates
+# surface checks. Add at least one flow or adapter before relying on it.
+name: REPLACE_ME
+project_type: custom
+test_url: REPLACE_ME
+
+pages:
+  - /
+
+viewports:
+  - desktop
+
+a11y_rules: wcag22aa
+visual_diff: true
+data_adapter: none
+
+monthly_token_cap: 2000000
+per_run_token_cap: 500000
+vision_call_cap_per_full: 30
+
+masking:
+  - selector: "[data-qa-mask]"
+
+report_dir: .qa/reports
+
+# Critical flows live in .qa/flows/*.spec.ts (Playwright tests)
+# At least one is recommended for project_type: custom.
