@@ -48,12 +48,18 @@ if (cmd === 'issue') {
   process.exit(0);
 }
 
+// Normalize paths for cross-platform comparison (forward vs backslash, casing on Windows)
+function normPath(p) {
+  if (!p) return p;
+  return path.resolve(p).replace(/\\/g, '/').toLowerCase();
+}
+
 if (cmd === 'verify') {
   const [run_id, project] = process.argv.slice(3);
   const e = entries.find(x => x.run_id === run_id);
   if (!e) { console.error('not found'); process.exit(1); }
   if (e.status !== 'open') { console.error(`status=${e.status}, expected open`); process.exit(1); }
-  if (project && e.project !== project) { console.error(`project mismatch: ledger=${e.project} got=${project}`); process.exit(1); }
+  if (project && normPath(e.project) !== normPath(project)) { console.error(`project mismatch: ledger=${e.project} got=${project}`); process.exit(1); }
   console.log(JSON.stringify(e));
   process.exit(0);
 }
@@ -76,7 +82,7 @@ if (cmd === 'verify-commit-prefix') {
   const fullId = `qa-learn-run-${m[1]}`;
   const e = entries.find(x => x.run_id === fullId);
   if (!e) { console.error(`run_id ${fullId} not found in ledger; commit is untrusted`); process.exit(1); }
-  if (e.project !== project) { console.error(`project mismatch`); process.exit(1); }
+  if (normPath(e.project) !== normPath(project)) { console.error(`project mismatch`); process.exit(1); }
   if (e.status !== 'open' && e.status !== 'consumed') { console.error(`status=${e.status}`); process.exit(1); }
   console.log(JSON.stringify(e));
   process.exit(0);

@@ -100,14 +100,54 @@ if (mode === '--confirm') {
   console.log(`Re-deriving from source-of-truth (${pending.source_type})...`);
 
   if (pending.source_type === 'human_authored') {
-    // Open the fixture file path; user retypes source_ref
-    const fxFile = pending.fixture_file || path.join(projectDir, '.qa', 'fixtures', 'good', `${pending.fingerprint}.json`);
+    // Locate the fixture file. Look in good/ then broken/.
+    const fxFile = pending.fixture_file
+      || (fs.existsSync(path.join(projectDir, '.qa', 'fixtures', 'good', `${pending.fingerprint}.json`))
+          ? path.join(projectDir, '.qa', 'fixtures', 'good', `${pending.fingerprint}.json`)
+          : path.join(projectDir, '.qa', 'fixtures', 'broken', `${pending.fingerprint}.json`));
     if (!fs.existsSync(fxFile)) fail(`fixture file not found at ${fxFile}; cannot re-derive`);
     const fx = JSON.parse(fs.readFileSync(fxFile, 'utf8'));
     if (!fx.source_ref) fail('fixture has no source_ref; cannot re-derive');
-    console.log(`Open ${fxFile}, find the source_ref field, and paste its value here:`);
-    console.log(`(For now in v1.x, this command requires the user to re-type via prompt — running interactively is required.)`);
-    fail('interactive retype not yet wired in v1.0; defer human_authored confirm to v1.1');
+
+    // Two retype paths: --retype "<value>" CLI arg (programmatic) OR interactive readline prompt (TTY).
+    const retypeIdx = args.indexOf('--retype');
+    const validateRetype = (typed) => {
+      if (!typed || !typed.trim()) fail('cancelled: empty input');
+      if (typed !== fx.source_ref) {
+        const expectedHash = require('crypto').createHash('sha256').update(fx.source_ref).digest('hex').slice(0, 12);
+        const typedHash = require('crypto').createHash('sha256').update(typed).digest('hex').slice(0, 12);
+        console.error(`source_ref mismatch (expected hash ${expectedHash}, got ${typedHash}). Rotation refused.`);
+        process.exit(8);
+      }
+      console.log(`source_ref re-derivation passed.`);
+      // Apply rotation immediately for human_authored (no async needed)
+      const appliedDir = path.join(projectDir, '.qa', 'fixtures', 'applied');
+      fs.mkdirSync(appliedDir, { recursive: true });
+      const appliedFile = path.join(appliedDir, `${runId}.json`);
+      fs.renameSync(pendingFile, appliedFile);
+      spawnSync('node', [path.join(__dirname, 'run-id-ledger.js'), 'consume', runId], { encoding: 'utf8' });
+      console.log(`Rotation applied. Fixture committed at ${appliedFile}.`);
+      process.exit(0);
+    };
+
+    if (retypeIdx >= 0 && args[retypeIdx + 1]) {
+      validateRetype(args[retypeIdx + 1]);
+      // unreachable; validateRetype exits
+    } else if (process.stdin.isTTY) {
+      const readline = require('readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      rl.question(`\nFixture: ${fxFile}\nFind the "source_ref" field in that file and retype its full value below.\n(Pasting from clipboard works. Empty input cancels.)\n\nsource_ref: `, ans => {
+        rl.close();
+        validateRetype(ans);
+      });
+      return; // wait for the readline callback
+    } else {
+      console.error(`\nThis confirm path requires the user to retype the source_ref value.`);
+      console.error(`Open: ${fxFile}`);
+      console.error(`Find the "source_ref" field. Then re-run with:`);
+      console.error(`  /qa:learn --confirm ${runId} --retype "<the exact source_ref value>"\n`);
+      fail('interactive prompt requires a TTY, or pass --retype "<value>" explicitly');
+    }
   } else if (pending.source_type === 'snapshot') {
     // Three-way diff: re-snap live, compare to pending AND to golden-at-creation
     const finding = pending.finding || {};
