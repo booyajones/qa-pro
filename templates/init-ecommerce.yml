@@ -1,0 +1,39 @@
+# qa-pro config — ecommerce site
+# Adds: purchase-flow critical paths, payment-form a11y emphasis, currency-format checks.
+name: REPLACE_ME
+project_type: ecommerce
+test_url: REPLACE_ME
+
+pages:
+  - /
+  - /shop
+  - /cart
+  - /checkout
+
+viewports:
+  - desktop
+  - mobile
+
+a11y_rules: wcag22aa
+visual_diff: true
+data_adapter: none  # or rest/jsonfile/postgres if inventory or pricing comes from a queryable source
+
+monthly_token_cap: 2000000
+per_run_token_cap: 500000
+vision_call_cap_per_full: 30
+
+masking:
+  - selector: "[data-qa-mask]"
+  - selector: "time, [datetime]"
+  - selector: ".cart-session-id, .order-id, [data-order-id]"
+  - selector: ".product-rating-count"  # often varies
+
+report_dir: .qa/reports
+
+# Recommended flows in .qa/flows/:
+#   - browse-to-cart.spec.ts (homepage → product → add to cart)
+#   - guest-checkout.spec.ts (cart → checkout up to payment screen, no real card submission)
+#   - search.spec.ts (search bar with common terms returns results)
+#
+# DO NOT submit real payment in tests; use Stripe/Adyen/etc test cards via Playwright
+# and assert the final order-confirmation page renders rather than asserting on payment success.

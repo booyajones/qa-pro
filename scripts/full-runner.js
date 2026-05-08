@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 // /qa:full orchestrator — chains smoke + lighthouse + visual into one merged report
-// Usage: node full-runner.js <project-dir>
+// Usage: node full-runner.js <project-dir> [--allow-dirty]
+//
+// --allow-dirty: pass through to data adapters (jsonfile etc) so user can iterate on
+// the source-of-truth file mid-development. Each use is counted in the dirty ledger and
+// surfaced in the report header; >5 uses in 30 days nudges toward /qa:learn.
 
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const projectDir = process.argv[2] || process.cwd();
+const args = process.argv.slice(2);
+const projectDir = (args[0] && !args[0].startsWith('--')) ? args[0] : process.cwd();
+const allowDirty = args.includes('--allow-dirty');
 const skillDir = path.join(__dirname, '..');
 
 function step(label, fn) {
@@ -85,8 +91,46 @@ let merged = {
   startedAt,
   finishedAt,
   data_adapter: cfg.data_adapter || 'none',
+  allow_dirty: allowDirty,
   findings: dedup,
 };
+
+// Data-correctness phase: invoke adapter per KPI if configured
+if (cfg.data_adapter && cfg.data_adapter !== 'none' && Array.isArray(cfg.kpis) && cfg.kpis.length) {
+  const adapterPath = path.join(__dirname, 'adapters', `${cfg.data_adapter}.js`);
+  if (!fs.existsSync(adapterPath)) {
+    merged.findings.push({ severity: 3, layer: 'data', finding: `data adapter "${cfg.data_adapter}" not implemented` });
+  } else {
+    const dataPhase = step(`data-correctness (${cfg.data_adapter} adapter, ${cfg.kpis.length} KPI(s))`, () => {
+      const findings = [];
+      for (const kpi of cfg.kpis) {
+        const adapterArgs = [adapterPath, projectDir, JSON.stringify(kpi)];
+        if (allowDirty) adapterArgs.push('--allow-dirty');
+        const r = spawnSync('node', adapterArgs, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+        if (r.status !== 0) {
+          findings.push({ severity: 1, layer: 'data', page: kpi.page, finding: `${kpi.name}: adapter failed`, detail: { stderr: (r.stderr || '').slice(0, 300) } });
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(r.stdout);
+          // Compare expected vs displayed (displayed value left to v1.1 — this phase currently
+          // only verifies the source-of-truth value can be retrieved with provenance intact).
+          findings.push({
+            severity: 4,
+            layer: 'data',
+            page: kpi.page,
+            finding: `${kpi.name} expected=${parsed.expected} (${parsed.cache || 'fresh'})`,
+            detail: parsed,
+          });
+        } catch (e) {
+          findings.push({ severity: 3, layer: 'data', page: kpi.page, finding: `${kpi.name}: adapter output unparseable`, detail: { stdout: r.stdout.slice(0, 300) } });
+        }
+      }
+      return { findings };
+    });
+    merged.findings = [...merged.findings, ...(dataPhase.findings || [])];
+  }
+}
 
 const findingsFile = path.join(projectDir, '.qa', 'last-findings.json');
 fs.writeFileSync(findingsFile, JSON.stringify(merged, null, 2));

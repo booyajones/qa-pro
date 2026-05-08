@@ -36,8 +36,8 @@ if (!validTypes.includes(cfg.project_type)) fail(`project_type must be one of: $
 
 if (!/^https?:\/\//.test(cfg.test_url)) fail(`test_url must start with http:// or https://`);
 
-if (cfg.data_adapter && !['jsonfile', 'rest', 'none'].includes(cfg.data_adapter)) {
-  fail(`data_adapter must be one of: jsonfile, rest, none (others ship in v1.2+)`);
+if (cfg.data_adapter && !['jsonfile', 'rest', 'postgres', 'graphql', 'bigquery', 'none'].includes(cfg.data_adapter)) {
+  fail(`data_adapter must be one of: jsonfile, rest, postgres, graphql, bigquery, none`);
 }
 
 if (!Array.isArray(cfg.pages) || !cfg.pages.length) cfg.pages = ['/'];

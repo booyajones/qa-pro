@@ -1,0 +1,64 @@
+# qa-pro config — web app with login required
+# Auth flow templates: see auth_strategy below; pick one.
+name: REPLACE_ME
+project_type: webapp-with-auth
+test_url: REPLACE_ME
+
+pages:
+  - /
+  - /dashboard
+
+viewports:
+  - desktop
+  - mobile
+
+a11y_rules: wcag22aa
+visual_diff: true
+
+# Auth strategy. Pick ONE and fill in only that block.
+auth_strategy: cookie  # one of: cookie | magic_link | oauth_callback | basic
+
+# Strategy: cookie (Playwright storageState)
+# Generate one-time: npx playwright codegen <login-url> --save-storage=.qa/auth/state.json
+auth_cookie:
+  storage_state_file: .qa/auth/state.json   # gitignored; never commit; regenerate on token expiry
+
+# Strategy: magic_link (uncomment if used)
+# auth_magic_link:
+#   trigger_endpoint: https://example.com/api/auth/magic
+#   email_inbox_api: imap://...
+#   from_pattern: noreply@example.com
+
+# Strategy: oauth_callback (uncomment if used)
+# auth_oauth:
+#   provider: google         # or github, microsoft, custom
+#   client_id_env: GOOGLE_CLIENT_ID
+#   client_secret_env: GOOGLE_CLIENT_SECRET
+#   refresh_token_env: GOOGLE_REFRESH_TOKEN
+
+# Strategy: basic (uncomment if used)
+# auth_basic:
+#   username_env: QA_USERNAME
+#   password_env: QA_PASSWORD
+
+data_adapter: jsonfile  # or rest, postgres, bigquery, graphql, none
+data_source:
+  path: data/expected_values.json
+  pin_to: git_head
+  refuse_dirty_working_tree: true
+
+kpis: []
+
+monthly_token_cap: 2000000
+per_run_token_cap: 500000
+vision_call_cap_per_full: 30
+
+masking:
+  - selector: "[data-qa-mask]"
+  - selector: "time, [datetime]"
+  - selector: "[data-user-id], [data-session-id]"
+
+report_dir: .qa/reports
+
+# Critical user flows (Playwright specs in .qa/flows/*.spec.ts)
+# Example: .qa/flows/login.spec.ts, .qa/flows/checkout.spec.ts

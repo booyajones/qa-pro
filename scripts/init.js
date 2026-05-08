@@ -46,7 +46,7 @@ function detect() {
 
 const detection = detect();
 const projectType = cfgType || detection.type;
-const validTypes = ['static-site', 'spa-dashboard', 'custom'];
+const validTypes = ['static-site', 'spa-dashboard', 'webapp-with-auth', 'ecommerce', 'custom'];
 if (!validTypes.includes(projectType)) {
   console.error(`Invalid type ${projectType}. Valid: ${validTypes.join(', ')}`);
   process.exit(1);
