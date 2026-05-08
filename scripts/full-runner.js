@@ -79,7 +79,7 @@ for (const f of allFindings) {
   dedup.push(f);
 }
 
-const merged = {
+let merged = {
   project: cfg.name,
   test_url: cfg.test_url,
   startedAt,
@@ -89,6 +89,17 @@ const merged = {
 };
 
 const findingsFile = path.join(projectDir, '.qa', 'last-findings.json');
+fs.writeFileSync(findingsFile, JSON.stringify(merged, null, 2));
+
+// Oracle phase — runs AFTER smoke/visual/lighthouse, before report build
+const oracle = step('oracle (verify suite still catches known fixtures)', () => {
+  const r = spawnSync('node', [path.join(__dirname, 'oracle-runner.js'), projectDir, findingsFile], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(r.stderr.split('\n')[0] || 'unknown');
+  return JSON.parse(r.stdout);
+});
+merged.findings = [...merged.findings, ...(oracle.findings || [])];
+merged.oracle_unmatched_critical = oracle.unmatched_critical || 0;
+merged.oracle_total_fixtures = oracle.total_fixtures_checked || 0;
 fs.writeFileSync(findingsFile, JSON.stringify(merged, null, 2));
 
 // Build report
