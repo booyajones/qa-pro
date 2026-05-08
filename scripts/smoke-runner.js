@@ -92,15 +92,29 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
           }
         } catch (e) { findings.push({ severity: 3, layer: 'a11y', page: pPath, finding: `axe failed: ${e.message}`, url }); }
 
-        // Functional: verify all <a> resolve
+        // Functional: verify all <a> resolve. Skip known bot-blocking domains (LinkedIn, Amazon, etc)
+        // which 404/503 non-browser requests regardless of method. Use GET, allow 405 (HEAD-rejected),
+        // allow 403 on social domains (often bot-detection).
+        const SKIP_DOMAINS = /(?:linkedin\.com|amazon\.[a-z.]+|instagram\.com|tiktok\.com|twitter\.com|x\.com|facebook\.com|youtube\.com|reddit\.com|medium\.com)$/i;
         try {
-          const links = await page.$$eval('a[href]', as => as.map(a => a.href).filter(h => h.startsWith('http')));
-          const unique = [...new Set(links)].slice(0, 30);
-          for (const l of unique) {
+          const linkData = await page.$$eval('a[href]', as => as.map(a => ({ href: a.href, text: a.textContent?.slice(0, 40) || '' })).filter(d => d.href.startsWith('http')));
+          const seen = new Set();
+          const unique = linkData.filter(d => { if (seen.has(d.href)) return false; seen.add(d.href); return true; }).slice(0, 30);
+          for (const { href: l } of unique) {
             try {
-              const r = await context.request.head(l, { timeout: 8000 });
-              if (r.status() >= 400) findings.push({ severity: 3, layer: 'functional', page: pPath, finding: `broken link: ${l} (${r.status()})`, url });
-            } catch {}
+              const u = new URL(l);
+              if (SKIP_DOMAINS.test(u.hostname)) continue; // bot-blocked, can't verify externally
+              const r = await context.request.get(l, { timeout: 10000, maxRedirects: 5 });
+              const s = r.status();
+              if (s >= 400 && s !== 405) {
+                findings.push({ severity: 3, layer: 'functional', page: pPath, finding: `broken link: ${l} (${s})`, url });
+              }
+            } catch (e) {
+              const msg = e.message || '';
+              if (!/timeout|ECONNRESET|ENOTFOUND/i.test(msg)) {
+                findings.push({ severity: 3, layer: 'functional', page: pPath, finding: `link error: ${l} :: ${msg.slice(0, 80)}`, url });
+              }
+            }
           }
         } catch {}
       }
