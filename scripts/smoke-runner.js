@@ -52,25 +52,51 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
     let s = 1; Math.random = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
   });
 
+  // Load v1.1 check modules (lazy require so missing files don't break v1.0 install paths)
+  const securityCheck = (() => { try { return require('./checks/security-headers'); } catch { return null; } })();
+  const seoCheck = (() => { try { return require('./checks/seo'); } catch { return null; } })();
+  const imagesCheck = (() => { try { return require('./checks/images'); } catch { return null; } })();
+  const fourOhFourCheck = (() => { try { return require('./checks/404'); } catch { return null; } })();
+
   const pages = (cfg.pages && cfg.pages.length) ? cfg.pages : ['/'];
 
   for (const pPath of pages) {
     const url = new URL(pPath, cfg.test_url).toString();
     const page = await context.newPage();
     const consoleErrors = [];
+    const consoleWarnings = []; // v1.1 Module 5: deprecations + CSP + mixed-content
     const networkErrors = [];
 
-    page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+    page.on('console', m => {
+      const t = m.type();
+      const text = m.text();
+      if (t === 'error') consoleErrors.push(text);
+      else if (t === 'warning' || t === 'warn') {
+        // Match deprecation / CSP / mixed-content patterns
+        if (/deprecated|will be removed|\[Deprecation\]|Mixed Content:|Content Security Policy:/i.test(text)) {
+          consoleWarnings.push(text);
+        }
+      }
+    });
     page.on('pageerror', e => consoleErrors.push(`pageerror: ${e.message}`));
     page.on('requestfailed', r => networkErrors.push(`${r.url()} :: ${r.failure()?.errorText}`));
 
     try {
       const resp = await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      // Stash main response for security-headers check
+      page._mainResponse = resp;
+      context._lastResponse = resp;
       if (!resp || !resp.ok()) {
         findings.push({ severity: 1, layer: 'functional', page: pPath, finding: `page returned ${resp?.status()}`, url });
       } else {
         if (consoleErrors.length) findings.push({ severity: 2, layer: 'functional', page: pPath, finding: 'console errors', detail: consoleErrors.slice(0, 5), url });
         if (networkErrors.length) findings.push({ severity: 2, layer: 'functional', page: pPath, finding: 'network failures', detail: networkErrors.slice(0, 5), url });
+        if (consoleWarnings.length) findings.push({ severity: 3, layer: 'console-warn', page: pPath, finding: `${consoleWarnings.length} deprecation/CSP/mixed-content warning(s)`, detail: consoleWarnings.slice(0, 5), url });
+
+        // v1.1 check modules
+        if (securityCheck) try { findings.push(...await securityCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'security', page: pPath, finding: `security check failed: ${e.message}`, url }); }
+        if (seoCheck) try { findings.push(...await seoCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'seo', page: pPath, finding: `seo check failed: ${e.message}`, url }); }
+        if (imagesCheck) try { findings.push(...await imagesCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'images', page: pPath, finding: `image check failed: ${e.message}`, url }); }
 
         // axe-core a11y
         try {
@@ -122,6 +148,14 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
       findings.push({ severity: 1, layer: 'functional', page: pPath, finding: `navigation failed: ${e.message}`, url });
     }
     await page.close();
+  }
+
+  // Once-per-run checks
+  if (seoCheck && seoCheck.runOnce) {
+    try { findings.push(...await seoCheck.runOnce(context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'seo', finding: `sitemap/robots check failed: ${e.message}` }); }
+  }
+  if (fourOhFourCheck && fourOhFourCheck.runOnce) {
+    try { findings.push(...await fourOhFourCheck.runOnce(context, cfg)); } catch (e) { findings.push({ severity: 3, layer: '404-check', finding: `404 check failed: ${e.message}` }); }
   }
 
   await browser.close();

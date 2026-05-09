@@ -1,6 +1,6 @@
 ---
 name: qa-pro
-version: 1.3.0
+version: 1.1.0
 description: Universal QA, UAT, accessibility, performance, visual, and data-correctness testing for any web project. Triggers on QA testing, regression check, visual diff, accessibility audit, before deploy verification, after frontend changes, dashboard testing, chart number reconciliation, broken UI check, marketing site smoke, lighthouse audit, axe-core, WCAG, "test this site", "is the dashboard right", "before I ship", "QA my app". Project-agnostic. Runs under existing Claude Code subscription, no external infra.
 allowed-tools:
   - Bash
@@ -194,6 +194,53 @@ Run these checks and print a green/yellow/red status table:
 ## §REPORT (open last report)
 
 `ls -t .qa/reports/*/index.html | head -1` then open in browser. If no reports, print *"No reports yet. Run /qa:smoke."*
+
+---
+
+## §GATE (pre-deploy gate, v1.1+)
+
+`/qa:smoke --gate` and `/qa:full --gate` compare findings against `.qa/accepted.yml` and exit:
+- **0 (PASS):** all Sev 1+2 findings are in the accepted set, OR no Sev 1+2 findings at all
+- **1 (WARN):** at least one NEW Sev 2 finding (and no NEW Sev 1)
+- **2 (BLOCK):** at least one NEW Sev 1 finding
+
+### Setting up the gate on an existing project (avoids day-1 wall of red)
+
+1. `/qa:init` (creates `.qa/config.yml`)
+2. `/qa:smoke` once to capture current state
+3. `qa-pro accept baseline` — snapshots all current Sev 1+2 findings as accepted with `source_type: human_authored`, `source_ref: chris@finexio <ISO> (qa-pro baseline)`, reason "baseline accepted on init"
+4. From now on, `/qa:smoke --gate` only fails on **NEW** findings introduced after the baseline
+
+### When the gate fires red
+
+User flow:
+1. `--gate` exits non-zero. CI fails or local script returns 1/2.
+2. Open `.qa/reports/<latest>/index.html` to see findings, especially the "NEW vs baseline" sev1/sev2 list.
+3. Decide for each new finding:
+   - **Real bug:** fix the underlying issue, re-run, gate goes green.
+   - **Acceptable change:** `node ~/.claude/skills/qa-pro/scripts/accept.js add <fingerprint> "<reason ≥10 chars>"` — adds to accepted.yml. Commit accepted.yml.
+   - **Suite drift:** if it's a known-broken fixture not detected, `/qa:learn --regression` to re-capture.
+
+### Generating a CI gate workflow
+
+`node ~/.claude/skills/qa-pro/scripts/install-gate.js` detects platform:
+- **GitHub Actions:** writes `.github/workflows/qa-gate.yml` (runs on every PR, uploads report artifact)
+- **Vercel:** prints buildCommand pre-script
+- **Netlify:** prints netlify.toml snippet
+- **Generic:** prints command-line invocation
+
+### Stack-aware sev tiers
+
+The security-headers check auto-detects host stack from response fingerprints (vercel, cloudflare, webflow, nextjs, netlify, generic). Each stack has a different sev profile to avoid false positives — e.g., HSTS missing is Sev 2 on generic but Sev 3 on Vercel (since Vercel often handles this at the edge).
+
+Override in `.qa/config.yml`:
+```yaml
+security:
+  stack: auto    # auto | vercel | cloudflare | webflow | nextjs | netlify | generic
+  disable: [csp, permissions]    # skip specific header checks
+  sev_override:
+    hsts: 3      # bump or lower per-rule
+```
 
 ---
 

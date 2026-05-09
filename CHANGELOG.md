@@ -2,6 +2,23 @@
 
 All notable changes to qa-pro.
 
+## [1.1.0] - 2026-05-08 — Pre-Deploy Gate
+- **Gate machinery (`gate.js`)**: `/qa:smoke --gate` and `/qa:full --gate` exit 0/1/2 based on **NEW** Sev 1+2 findings vs `.qa/accepted.yml` baseline. Eliminates day-1 wall of red on existing projects.
+- **`accept.js`**: `qa-pro accept add|remove|list|baseline` commands manage the accepted set. `baseline` snapshots all current Sev 1+2 findings as accepted with provenance (`source_type: human_authored`, ISO timestamp).
+- **Stack auto-detection (`stack-detect.js`)**: response-header fingerprinting detects vercel/cloudflare/webflow/nextjs/netlify/generic. Each stack gets a sev profile (e.g., HSTS is Sev 2 on generic, Sev 3 on managed hosts). Configurable via `.qa/config.yml` `security.stack` and `security.disable`.
+- **`checks/security-headers.js`**: HTTPS enforcement (universal Sev 1), HSTS, X-Content-Type-Options, X-Frame-Options/CSP frame-ancestors, CSP, Referrer-Policy, Permissions-Policy. CSP `report-uri` redacted by secret scan.
+- **`checks/seo.js`**: title length (10-65), meta description (50-160), canonical (absolute), og:title/description/image, twitter:card, html lang, JSON-LD parse-validity. Once-per-run: sitemap.xml + robots.txt reachable. Skipped on localhost.
+- **`checks/images.js`**: alt missing → Sev 2, broken (4xx/5xx) → Sev 2, oversized (>500KB configurable) → Sev 3.
+- **`checks/404.js`**: redirect-aware probe at random path. Login-redirect or login-form-on-200 → skipped (auth-walled). Real 200 with non-login content → Sev 2 broken-routing finding.
+- **Console warnings tier (in smoke-runner)**: deprecations, mixed-content, CSP violations captured as Sev 3.
+- **`install-gate.js`**: detects platform (GitHub Actions, Vercel, Netlify, generic), generates `.github/workflows/qa-gate.yml` for GitHub. Refuses to overwrite existing workflows.
+- **smoke-runner refactored**: lazy-requires v1.1 check modules so v1.0 install paths still work. Console-warn capture extension.
+- **Validated**: chriswyatt.dev → 3 findings (1 Sev 3 CSP-missing, 1 Sev 4 stack=vercel, 1 Sev 4 404-routing-OK). Stack auto-detection correctly identified Vercel and applied lenient profile (no day-1 wall of red).
+
+Council: SHIP, all 3 reviewers ≥8 across all 8 dimensions on v1.1 plan v2.0.
+
+Deferred to v1.2: cross-browser smoke, `--changed-only` (with deploy SHA resolution), trend tracking + run-history retention, `/qa:trend` command.
+
 ## [1.0.4] - 2026-05-08
 - `learn.js`: snapshot source_type `--confirm` now does a real three-way pixel diff at confirm time. Re-snaps live page, compares to pending baseline AND immutable golden-at-creation. Both must match within tolerance (`visual_threshold` for live↔pending, 50× tolerance for live↔golden). Catches lockstep drift.
 - `adapters/rest.js`: REST data-correctness adapter. JSONPath-lite extraction, optional bearer-token auth via env-var reference, optional SHA-256 integrity check.
