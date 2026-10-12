@@ -22,7 +22,12 @@ jobs:
       - run: npx playwright install chromium --with-deps
       - name: Config schema checks
         run: |
-          for config in templates/init-*.yml; do node scripts/validate-config.js "$config" >/dev/null; done
+          for config in templates/init-*.yml; do
+            kind=$(basename "$config" .yml); kind=${kind#init-}
+            target="$RUNNER_TEMP/config-$kind"
+            node scripts/init.js "$target" --type "$kind" --url http://127.0.0.1:3000 --name synthetic --non-interactive
+            node scripts/validate-config.js "$target/.qa/config.yml" >/dev/null
+          done
       - name: Deterministic runtime and real browser regressions
         run: npm test
       - name: Installed tool health
