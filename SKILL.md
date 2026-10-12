@@ -72,12 +72,9 @@ Goal: drop a working `.qa/config.yml` and oracle fixtures into the user's projec
    For project_type=`custom` AND zero flows AND no adapter, also print: *"Warning: with no critical flows or data adapter, this suite only validates surface checks. Add at least one flow before relying on it. This warning will appear in every report."*
 5. **Copy template** from `~/.claude/skills/qa-pro/templates/init-{static-site|spa-dashboard|custom}.yml` to `<cwd>/.qa/config.yml` with answers merged in.
 6. **Create directories:** `<cwd>/.qa/{fixtures/{good,broken},flows,queries,reports,pending_rotations}`. Add `.qa/reports/` and `.qa/pending_rotations/` to `.gitignore` (append, don't replace).
-7. **Snapshot known-good fixtures.** For each page in config:
-   - Use Playwright (via `npx playwright`) to take a screenshot at the configured viewport.
-   - Save to `.qa/fixtures/good/<page-slug>/golden-at-creation.png` (immutable) AND `.qa/fixtures/good/<page-slug>/baseline.png` (rolling).
-   - Write `.qa/fixtures/good/<page-slug>/meta.json` with `source_type: "human_authored"`, `source_ref: "chris@<email> <ISO timestamp>"`, `claude_inspection_allowed: false`.
-8. **Batch confirm:** *"Snapshotted N pages. Approve all as known-good? [Y / n / review-each]"*
-9. **Scrape known-broken from git history.** If cwd has `.git`, run `git log --oneline -50 --grep='^fix:\|^bug:\|^regression:'`. Cap at 6 most recent. Propose each as a known-broken fixture with `source_type: "commit_sha"`, `source_ref: "<sha>"`. Batch confirm.
+7. **Capture candidate fixtures.** For each configured page and viewport, save independently captured screenshots under `.qa/pending_rotations/initial/`. Keep existing live baselines and immutable goldens unchanged.
+8. **Obtain explicit approval of the exact controls.** Present candidates for review. Only after approval, create the live baseline and immutable golden and record the actual source, approver and reason in meta.json. A machine capture or approval of a URL is not human authorship or fixture approval. Never invent Chris's approval.
+9. **Find known-bug candidates in history.** Fix commits are leads, not broken controls. Verify a reproducible failing control before adding it, cite the actual defective commit or verified bug ticket and retain its evidence. Confirm the exact fixture set with the user; do not turn a model's diagnosis into ground truth.
 10. **Print success.** *"qa-pro initialized. Run /qa:smoke to validate. Coverage: <recap>."*
 
 ---
@@ -208,7 +205,7 @@ Run these checks and print a green/yellow/red status table:
 
 1. `/qa:init` (creates `.qa/config.yml`)
 2. `/qa:smoke` once to capture current state
-3. `qa-pro accept baseline` — snapshots all current Sev 1+2 findings as accepted with `source_type: human_authored`, `source_ref: chris@finexio <ISO> (qa-pro baseline)`, reason "baseline accepted on init"
+3. Show the exact current Sev 1+2 findings and obtain explicit approval before invoking `qa-pro accept baseline`. Initialization or approval of a test URL does not approve defects. Record the actual approver, provenance and reason; never manufacture Chris's approval.
 4. From now on, `/qa:smoke --gate` only fails on **NEW** findings introduced after the baseline
 
 ### When the gate fires red
