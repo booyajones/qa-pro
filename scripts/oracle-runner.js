@@ -51,7 +51,7 @@ if (fs.existsSync(brokenDir)) {
   for (const fxName of fixtureFiles) {
     let fx;
     try { fx = JSON.parse(fs.readFileSync(path.join(brokenDir, fxName), 'utf8')); }
-    catch (e) { oracleFindings.push({ severity: 3, layer: 'oracle', finding: `unparseable fixture: ${fxName}`, detail: { error: e.message } }); continue; }
+    catch (e) { unmatchedCriticalCount++; oracleFindings.push({ severity: 1, layer: 'oracle', finding: `unparseable fixture: ${fxName}`, detail: { error: e.message } }); continue; }
 
     // Sanity: refuse fixtures with claude_inspection provenance
     if (fx.source_type === 'claude_inspection' || fx.claude_inspection_allowed === true) {
@@ -104,9 +104,10 @@ if (fs.existsSync(goodDir)) {
       const metaPath = path.join(goodDir, slug, vp, 'meta.json');
       if (!fs.existsSync(metaPath)) continue;
       let meta;
-      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { continue; }
-      if (meta.source_type === 'claude_inspection') {
-        oracleFindings.push({ severity: 2, layer: 'oracle', finding: `good fixture ${slug}/${vp} has invalid provenance (claude_inspection)` });
+      try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { unmatchedCriticalCount++; oracleFindings.push({ severity: 1, layer: 'oracle', finding: `unparseable good fixture: ${slug}/${vp}` }); continue; }
+      if (!meta.source_ref || !meta.source_type || meta.source_type === 'claude_inspection' || meta.claude_inspection_allowed === true) {
+        unmatchedCriticalCount++;
+        oracleFindings.push({ severity: 1, layer: 'oracle', finding: `good fixture ${slug}/${vp} has invalid provenance (claude_inspection)` });
         continue;
       }
       // Check if any Sev 1+2 finding fired on this page

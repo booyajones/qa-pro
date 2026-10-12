@@ -2,12 +2,8 @@
 // Visual regression — pixel diff with immutable golden-at-creation anchors
 // Usage: node visual-runner.js <project-dir> <config-json-path>
 //
-// Behavior:
-//   - For each page in config, takes a deterministic screenshot at fixed viewport.
-//   - First run for a page: saves to .qa/fixtures/good/<slug>/baseline.png
-//                            AND to .qa/fixtures/good/<slug>/golden-at-creation.png (immutable; never overwritten)
-//   - Subsequent runs: pixel-diff current vs baseline.png; saves diff overlay if non-trivial.
-//   - Findings: diffs above threshold surface as Sev 3 (visual drift).
+// Approved baseline, immutable golden and provenance must already exist.
+// Missing fixtures fail without overwriting either anchor.
 
 const fs = require('fs');
 const path = require('path');
@@ -36,10 +32,10 @@ async function deterministicContext(browser, viewportName) {
     reducedMotion: 'reduce',
   });
   await ctx.addInitScript(() => {
-    const epoch = 1717286400000;
+    const epoch = 1767225600000;
     Date.now = () => epoch;
     const D = Date;
-    Date = function(...args) { return args.length ? new D(...args) : new D(epoch); };
+    Date = function(...args) { return new.target ? (args.length ? new D(...args) : new D(epoch)) : new D(epoch).toString(); };
     Date.now = () => epoch;
     Object.setPrototypeOf(Date, D);
     Date.prototype = D.prototype;
@@ -93,28 +89,23 @@ async function deterministicContext(browser, viewportName) {
       const buf = await page.screenshot({ fullPage: false, type: 'png' });
       fs.writeFileSync(currentFile, buf);
 
-      if (!fs.existsSync(baselineFile)) {
-        // First run: establish baseline AND golden-at-creation (immutable)
-        fs.writeFileSync(baselineFile, buf);
-        fs.writeFileSync(goldenFile, buf);
-        fs.writeFileSync(metaFile, JSON.stringify({
-          page: pPath,
-          viewport,
-          source_type: 'human_authored',
-          source_ref: `qa-pro auto-snapshot ${new Date().toISOString()}`,
-          claude_inspection_allowed: false,
-          golden_immutable: true,
-          created_at: new Date().toISOString(),
-        }, null, 2));
-        findings.push({ severity: 4, layer: 'visual', page: pPath, viewport, finding: `baseline established for ${slug}/${viewport}`, url });
+      if (!fs.existsSync(baselineFile) || !fs.existsSync(goldenFile) || !fs.existsSync(metaFile)) {
+        findings.push({ severity: 1, layer: 'visual', page: pPath, viewport,
+          finding: `approved baseline or immutable golden missing for ${slug}/${viewport}; capture and approve fixtures before gating`, url });
+        continue;
+      }
+      const provenance = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+      if (!provenance.source_ref || /^qa-pro auto-snapshot/.test(provenance.source_ref) || provenance.source_type === 'claude_inspection' || provenance.claude_inspection_allowed === true) {
+        findings.push({ severity: 1, layer: 'visual', page: pPath, viewport, finding: `baseline has no approved provenance for ${slug}/${viewport}`, url });
         continue;
       }
 
       // Compare current vs baseline
       const baseline = PNG.sync.read(fs.readFileSync(baselineFile));
+      const golden = PNG.sync.read(fs.readFileSync(goldenFile));
       const current = PNG.sync.read(buf);
 
-      if (baseline.width !== current.width || baseline.height !== current.height) {
+      if (baseline.width !== current.width || baseline.height !== current.height || golden.width !== current.width || golden.height !== current.height) {
         findings.push({
           severity: 2, layer: 'visual', page: pPath, viewport,
           finding: `viewport size changed: baseline ${baseline.width}x${baseline.height} vs current ${current.width}x${current.height}`,
@@ -127,6 +118,11 @@ async function deterministicContext(browser, viewportName) {
       const diffPixels = pixelmatch(baseline.data, current.data, diff.data, baseline.width, baseline.height, { threshold: 0.1, alpha: 0.4 });
       const totalPixels = baseline.width * baseline.height;
       const diffRatio = diffPixels / totalPixels;
+      const goldenPixels = pixelmatch(golden.data, current.data, null, current.width, current.height, { threshold: 0.1 });
+      if (goldenPixels / totalPixels > threshold) {
+        findings.push({ severity: 1, layer: 'visual', page: pPath, viewport,
+          finding: `rendered page drifted from its immutable golden on ${slug}`, detail: { diff_ratio: goldenPixels / totalPixels }, url });
+      }
 
       if (diffRatio > threshold) {
         fs.writeFileSync(diffFile, PNG.sync.write(diff));

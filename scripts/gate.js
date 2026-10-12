@@ -57,7 +57,7 @@ const newSev2 = [];
 for (const f of findings) {
   if (f.severity > 2) continue;
   const fp = fingerprint(f);
-  if (!acceptedFingerprints.has(fp)) {
+  if (['tooling', 'oracle'].includes(f.layer) || !acceptedFingerprints.has(fp)) {
     if (f.severity === 1) newSev1.push({ ...f, fingerprint: fp });
     else if (f.severity === 2) newSev2.push({ ...f, fingerprint: fp });
   }

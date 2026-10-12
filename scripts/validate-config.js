@@ -12,11 +12,7 @@ function fail(msg) { console.error(`qa-pro config error: ${msg}`); process.exit(
 const skillDir = path.join(__dirname, '..');
 function ensure(pkg) {
   try { return require(path.join(skillDir, 'node_modules', pkg)); }
-  catch {
-    console.error(`(installing ${pkg}...)`);
-    execSync(`npm install --no-save --prefix "${skillDir}" ${pkg}`, { stdio: 'inherit' });
-    return require(path.join(skillDir, 'node_modules', pkg));
-  }
+  catch { fail(`missing ${pkg}; install this reviewed skill with npm ci`); }
 }
 const yaml = ensure('js-yaml');
 

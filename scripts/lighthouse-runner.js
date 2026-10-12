@@ -18,23 +18,27 @@ for (const p of pages) {
   const url = new URL(p, testUrl).toString();
   console.error(`Lighthouse: ${url}`);
 
-  // Use lighthouse via npx; fall back gracefully if not installed
-  const result = spawnSync('npx', ['--yes', 'lighthouse@latest', url, '--output=json', '--chrome-flags=--headless --no-sandbox', '--quiet', '--only-categories=performance,accessibility,best-practices,seo'], {
+  // Use the lockfile's installed version and argv, never a shell or @latest.
+  const result = spawnSync(process.execPath, [path.join(skillDir, 'node_modules/lighthouse/cli/index.js'), url, '--output=json', '--chrome-flags=--headless --no-sandbox', '--quiet', '--only-categories=performance,accessibility,best-practices,seo'], {
     encoding: 'utf8',
     cwd: skillDir,
     timeout: 90000,
-    shell: true,
   });
 
   if (result.status !== 0) {
-    findings.push({ severity: 3, layer: 'perf', page: p, finding: `lighthouse failed: ${(result.stderr || '').slice(0, 200)}`, url });
+    findings.push({ severity: 1, layer: 'perf', page: p, finding: `lighthouse failed: ${(result.stderr || '').slice(0, 200)}`, url });
     continue;
   }
 
   let lh;
-  try { lh = JSON.parse(result.stdout); } catch { findings.push({ severity: 3, layer: 'perf', page: p, finding: 'lighthouse output unparseable', url }); continue; }
+  try { lh = JSON.parse(result.stdout); } catch { findings.push({ severity: 1, layer: 'perf', page: p, finding: 'lighthouse output unparseable', url }); continue; }
 
   const cats = lh.categories || {};
+  if (lh.runtimeError || ['performance', 'accessibility', 'best-practices', 'seo'].some(name =>
+      typeof cats[name]?.score !== 'number' || cats[name].score < 0 || cats[name].score > 1)) {
+    findings.push({ severity: 1, layer: 'perf', page: p, finding: 'lighthouse report missing required category evidence', url });
+    continue;
+  }
   const perf = cats.performance?.score;
   const a11y = cats.accessibility?.score;
   const bp = cats['best-practices']?.score;

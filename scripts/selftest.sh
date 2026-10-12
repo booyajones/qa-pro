@@ -34,7 +34,9 @@ node "$SKILL_DIR_W/scripts/init.js" "$TEST_PROJECT" --url "$TEST_URL" --type sta
 echo
 
 echo "Step 2/4: doctor (post-init; allow yellow, fail on red)"
+set +e
 node "$SKILL_DIR_W/scripts/doctor.js" "$TEST_PROJECT"; DOCTOR_RC=$?
+set -e
 if [ "$DOCTOR_RC" -gt 1 ]; then
   echo "FAIL: doctor reported red rows (rc=$DOCTOR_RC)"
   exit 1

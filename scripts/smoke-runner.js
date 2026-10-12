@@ -12,40 +12,50 @@ const full = process.argv.includes('--full');
 if (!cfgPath || !fs.existsSync(cfgPath)) { console.error('config json required'); process.exit(1); }
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 
-// Ensure Playwright available; install if needed
-function ensure(pkg) {
-  try { require.resolve(pkg, { paths: [process.cwd(), path.join(__dirname, '..')] }); return true; }
-  catch { return false; }
-}
-
-if (!ensure('playwright')) {
-  console.log('Installing playwright (one-time)...');
-  execSync('npm install --no-save playwright @axe-core/playwright', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
-  execSync('npx playwright install chromium --with-deps', { cwd: path.join(__dirname, '..'), stdio: 'inherit' });
+// Missing locked dependencies are a setup failure, not an implicit network install.
+for (const pkg of ['playwright', '@axe-core/playwright']) {
+  try { require.resolve(pkg, { paths: [path.join(__dirname, '..')] }); }
+  catch { console.error(`missing ${pkg}; install this reviewed skill with npm ci`); process.exit(1); }
 }
 
 const { chromium } = require(path.join(__dirname, '..', 'node_modules', 'playwright'));
 const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core/playwright')).default;
 
+// Landed-URL check: a page that redirects was never tested, and its findings would be the landing
+// page's filed under the page asked for. Same origin and path; one trailing slash either way is the same page.
+function landedElsewhere(askedUrl, landedUrl) {
+  const asked = new URL(askedUrl), landed = new URL(landedUrl);
+  const bare = u => u.pathname.replace(/\/$/, '');
+  return asked.origin !== landed.origin || bare(asked) !== bare(landed);
+}
+// networkidle's own 500 ms quiet window absorbs a client-side redirect fired on load or after a fetch. For one
+// fired later, this settle and the re-check after the checks work together (measured 2026-09-23 on 15 redirect
+// fixtures: 8 caught without either, 10 with the settle only, 11 with the re-check only, 14 with both, as many as
+// a 1000 ms settle; a 1 s timer and a 1 s meta refresh needed both; a timer 2 s after load got through).
+const LANDED_SETTLE_MS = 500;
+
 (async () => {
   const findings = [];
   const startedAt = new Date().toISOString();
 
-  const browser = await chromium.launch();
+  const requestedBrowser = process.argv[process.argv.indexOf("--browser") + 1];
+  const engine = process.argv.includes("--browser") ? requestedBrowser : "chromium";
+  if (!["chromium", "firefox", "webkit"].includes(engine)) throw new Error("unsupported browser engine");
+  const browser = await require(path.join(__dirname, "..", "node_modules", "playwright"))[engine].launch();
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
-    userAgent: 'qa-pro-smoke/1.3',
+    userAgent: 'qa-pro-smoke/1.4',
     reducedMotion: 'reduce',
   });
 
   // Determinism: freeze Date.now and Math.random
   await context.addInitScript(() => {
-    const epoch = 1717286400000; // 2026-01-01
+    const epoch = 1767225600000; // 2026-01-01 UTC
     const orig = Date.now;
     Date.now = () => epoch;
     const D = Date;
     // @ts-ignore
-    Date = function(...args) { return args.length ? new D(...args) : new D(epoch); };
+    Date = function(...args) { return new.target ? (args.length ? new D(...args) : new D(epoch)) : new D(epoch).toString(); };
     Date.now = () => epoch;
     Object.setPrototypeOf(Date, D);
     Date.prototype = D.prototype;
@@ -57,6 +67,15 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
   const seoCheck = (() => { try { return require('./checks/seo'); } catch { return null; } })();
   const imagesCheck = (() => { try { return require('./checks/images'); } catch { return null; } })();
   const fourOhFourCheck = (() => { try { return require('./checks/404'); } catch { return null; } })();
+
+  // The 404 probe's auth-wall test, so the two checks agree on what a sign-in gate looks like.
+  const isAuthWallPath = fourOhFourCheck && fourOhFourCheck.isAuthWallPath;
+  const landedFinding = (pPath, url, landedUrl) => ({
+    severity: 1, layer: 'functional', page: pPath,
+    finding: `landed on ${landedUrl}: the page itself was not tested`,
+    detail: { landed: landedUrl, auth_wall: isAuthWallPath ? isAuthWallPath(new URL(landedUrl).pathname) : undefined },
+    url,
+  });
 
   const pages = (cfg.pages && cfg.pages.length) ? cfg.pages : ['/'];
 
@@ -86,15 +105,19 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
       // Stash main response for security-headers check
       page._mainResponse = resp;
       context._lastResponse = resp;
+      if (resp && resp.ok()) await page.waitForTimeout(LANDED_SETTLE_MS);
+      const pageFindingsFrom = findings.length;
       if (!resp || !resp.ok()) {
         findings.push({ severity: 1, layer: 'functional', page: pPath, finding: `page returned ${resp?.status()}`, url });
+      } else if (landedElsewhere(url, page.url())) {
+        findings.push(landedFinding(pPath, url, page.url()));
       } else {
         if (consoleErrors.length) findings.push({ severity: 2, layer: 'functional', page: pPath, finding: 'console errors', detail: consoleErrors.slice(0, 5), url });
         if (networkErrors.length) findings.push({ severity: 2, layer: 'functional', page: pPath, finding: 'network failures', detail: networkErrors.slice(0, 5), url });
         if (consoleWarnings.length) findings.push({ severity: 3, layer: 'console-warn', page: pPath, finding: `${consoleWarnings.length} deprecation/CSP/mixed-content warning(s)`, detail: consoleWarnings.slice(0, 5), url });
 
         // v1.1 check modules
-        if (securityCheck) try { findings.push(...await securityCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'security', page: pPath, finding: `security check failed: ${e.message}`, url }); }
+        if (securityCheck) try { findings.push(...await securityCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 1, layer: 'security', page: pPath, finding: `security check failed: ${e.message}`, url }); }
         if (seoCheck) try { findings.push(...await seoCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'seo', page: pPath, finding: `seo check failed: ${e.message}`, url }); }
         if (imagesCheck) try { findings.push(...await imagesCheck.run(page, context, cfg)); } catch (e) { findings.push({ severity: 3, layer: 'images', page: pPath, finding: `image check failed: ${e.message}`, url }); }
 
@@ -114,9 +137,9 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
           }
           const minor = axe.violations.filter(v => v.impact === 'moderate' || v.impact === 'minor');
           for (const v of minor) {
-            findings.push({ severity: 3, layer: 'a11y', page: pPath, finding: v.help, detail: { id: v.id, nodes: v.nodes.length }, url });
+            findings.push({ severity: 1, layer: 'a11y', page: pPath, finding: v.help, detail: { id: v.id, nodes: v.nodes.length }, url });
           }
-        } catch (e) { findings.push({ severity: 3, layer: 'a11y', page: pPath, finding: `axe failed: ${e.message}`, url }); }
+        } catch (e) { findings.push({ severity: 1, layer: 'a11y', page: pPath, finding: `axe failed: ${e.message}`, url }); }
 
         // Functional: verify all <a> resolve. Skip known bot-blocking domains (LinkedIn, Amazon, etc)
         // which 404/503 non-browser requests regardless of method. Use GET, allow 405 (HEAD-rejected),
@@ -143,6 +166,12 @@ const AxeBuilder = require(path.join(__dirname, '..', 'node_modules', '@axe-core
             }
           }
         } catch {}
+
+        // A redirect that fired while the checks ran means they tested the page it went to: drop them.
+        if (landedElsewhere(url, page.url())) {
+          findings.length = pageFindingsFrom;
+          findings.push(landedFinding(pPath, url, page.url()));
+        }
       }
     } catch (e) {
       findings.push({ severity: 1, layer: 'functional', page: pPath, finding: `navigation failed: ${e.message}`, url });

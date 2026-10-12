@@ -2,8 +2,7 @@
 
 Universal QA, UAT, accessibility, performance, visual, and data-correctness testing for any web project. A Claude Code skill that runs entirely under your existing Claude Code subscription.
 
-[![Council-approved](https://img.shields.io/badge/council-8%2F8-brightgreen)]()
-[![Skill version](https://img.shields.io/badge/version-1.0.4-blue)]()
+[![Skill version](https://img.shields.io/badge/version-1.4.0-blue)]()
 
 ## What it does
 
@@ -22,10 +21,10 @@ The skill lives at `~/.claude/skills/qa-pro/` and is auto-discovered by Claude C
 
 ```bash
 git clone https://github.com/booyajones/qa-pro.git ~/.claude/skills/qa-pro
-cd ~/.claude/skills/qa-pro && npm install
+cd ~/.claude/skills/qa-pro && npm ci
 ```
 
-Playwright + axe-core + Lighthouse + pixelmatch all install via `npm install`. Chromium downloads on first `/qa:smoke` run if not cached.
+Playwright + axe-core + Lighthouse + pixelmatch all install via `npm ci`. Install engines explicitly with `npx playwright install chromium` (add `firefox webkit` when cross-browser is configured).
 
 ## Use
 
@@ -35,10 +34,10 @@ In any project directory, in any Claude Code session:
 # First time setup for a project
 /qa:init
 
-# Fast suite (~5 min): smoke + visual + a11y
+# Fast suite (measure on your project): smoke + visual + a11y
 /qa:smoke
 
-# Full suite (~50 sec + Lighthouse 30-60 sec): adds perf + Lighthouse + oracle
+# Full suite (measure on your project): runs all configured layers
 /qa:full
 
 # Open the latest report
@@ -82,7 +81,7 @@ Drop one of these into `.qa/config.yml` (or run `/qa:init`):
 │   ├── visual-runner.js        # pixel-diff + golden-at-creation
 │   ├── lighthouse-runner.js    # Lighthouse v12
 │   ├── oracle-runner.js        # broken-fixture matching + good-fixture protection
-│   ├── full-runner.js          # orchestrator: smoke → visual → lighthouse → oracle → report
+│   ├── full-runner.js          # orchestrator: smoke → visual → lighthouse → critical flows → data → oracle → report
 │   ├── learn.js                # /qa:learn --approve/--confirm/--regression
 │   ├── doctor.js               # /qa:doctor health check
 │   ├── open-report.js          # /qa:report
@@ -137,3 +136,11 @@ The suite cannot grade itself green. Defenses:
 ## License
 
 Private. Owned by Chris Wyatt.
+
+## v1.4.0 repairs and acceptance
+
+The full gate now blocks required-tool crashes, executes configured critical flows and compares displayed KPIs with an independently fetched source. Visual runs preserve approved goldens and refuse missing/machine-approved baselines. Reports escape untrusted content, redact uploaded JSON and distinguish unrun layers. Installed redirect fixes are included.
+
+`npm test` runs runtime fault injection and real Chromium controls: wrong versus matching numbers, broken versus passing flow assertions, skipped flows and protected goldens. These synthetic controls establish tool behavior, not correctness of a production application.
+
+For GitHub, run `node scripts/install-gate.js /absolute/project/path --ref <reviewed-40-character-commit-sha>`. Review the generated workflow and configure a dedicated reachable QA URL. The gate uses read-only permissions, an unpersisted checkout token, locked packages and explicit browser installation. A green surface check does not establish signed-in or cross-browser coverage unless those layers actually ran.

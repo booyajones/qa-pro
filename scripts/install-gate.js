@@ -5,7 +5,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const projectDir = process.argv[2] || process.cwd();
+const projectDir = path.resolve(process.argv[2] || process.cwd());
+const refIndex = process.argv.indexOf('--ref');
+const ref = refIndex >= 0 ? process.argv[refIndex + 1] : process.env.QA_PRO_REF;
 
 function detectPlatform() {
   const has = (p) => fs.existsSync(path.join(projectDir, p));
@@ -18,6 +20,10 @@ function detectPlatform() {
 const platform = detectPlatform();
 
 if (platform === 'github-actions' || (!fs.existsSync(path.join(projectDir, '.github')) && process.argv.includes('--github'))) {
+  if (!/^[a-f0-9]{40}$/.test(ref || '')) {
+    console.error('Pass --ref <reviewed 40-character qa-pro commit SHA> to pin the installed gate.');
+    process.exit(1);
+  }
   const wfDir = path.join(projectDir, '.github', 'workflows');
   const wfPath = path.join(wfDir, 'qa-gate.yml');
   if (fs.existsSync(wfPath)) {
@@ -32,11 +38,17 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   qa-gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -45,23 +57,28 @@ jobs:
 
       - name: Install qa-pro
         run: |
-          git clone https://github.com/booyajones/qa-pro.git ~/.claude/skills/qa-pro
-          cd ~/.claude/skills/qa-pro && npm install
-          npx playwright install chromium --with-deps
+          mkdir -p ~/.claude/skills/qa-pro
+          cd ~/.claude/skills/qa-pro
+          git init -q .
+          git fetch -q --depth=1 https://github.com/booyajones/qa-pro.git "${ref}"
+          git checkout -q --detach FETCH_HEAD
+          npm ci
+          npx playwright install chromium firefox webkit --with-deps
 
       - name: Run qa-pro gate
         run: |
           cd ~/.claude/skills/qa-pro/scripts
           node validate-config.js \${{ github.workspace }}/.qa/config.yml > \${{ github.workspace }}/.qa/config.json
-          node smoke-runner.js \${{ github.workspace }}/.qa/config.json > \${{ github.workspace }}/.qa/last-findings.json
-          node gate.js \${{ github.workspace }}/.qa/last-findings.json \${{ github.workspace }}
+          node full-runner.js \${{ github.workspace }} --gate
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: qa-pro-report
-          path: \${{ github.workspace }}/.qa/reports/
+          path: |
+            \${{ github.workspace }}/.qa/reports/
+            \${{ github.workspace }}/.qa/last-findings.json
           retention-days: 14
 `;
   fs.writeFileSync(wfPath, yaml);
@@ -76,7 +93,7 @@ if (platform === 'vercel') {
   console.log(``);
   console.log(`Option A (recommended): use Vercel Build Command pre-script.`);
   console.log(`  Add to vercel.json:`);
-  console.log(`    "buildCommand": "node ~/.claude/skills/qa-pro/scripts/smoke-runner.js .qa/config.json > .qa/last-findings.json && node ~/.claude/skills/qa-pro/scripts/gate.js .qa/last-findings.json . && <your existing build cmd>"`);
+  console.log(`    "buildCommand": "node ~/.claude/skills/qa-pro/scripts/full-runner.js . --gate && <your existing build cmd>"`);
   console.log(``);
   console.log(`Option B: GitHub Actions pre-merge gate (run again with --github to write that workflow).`);
   process.exit(0);
@@ -85,14 +102,13 @@ if (platform === 'vercel') {
 if (platform === 'netlify') {
   console.log(`Netlify detected. Add to netlify.toml:`);
   console.log(`[build]`);
-  console.log(`  command = "node ~/.claude/skills/qa-pro/scripts/smoke-runner.js .qa/config.json > .qa/last-findings.json && node ~/.claude/skills/qa-pro/scripts/gate.js .qa/last-findings.json . && <your existing build cmd>"`);
+  console.log(`  command = "node ~/.claude/skills/qa-pro/scripts/full-runner.js . --gate && <your existing build cmd>"`);
   process.exit(0);
 }
 
 // Generic fallback
 console.log(`Generic platform — paste the following into your CI:`);
 console.log(``);
-console.log(`  node ~/.claude/skills/qa-pro/scripts/smoke-runner.js .qa/config.json > .qa/last-findings.json`);
-console.log(`  node ~/.claude/skills/qa-pro/scripts/gate.js .qa/last-findings.json .`);
+console.log(`  node ~/.claude/skills/qa-pro/scripts/full-runner.js . --gate`);
 console.log(`  # exit 0 = green, 1 = NEW Sev 2, 2 = NEW Sev 1`);
 process.exit(0);

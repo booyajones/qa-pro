@@ -12,6 +12,11 @@ const shouldOpen = process.argv.includes('--open');
 
 if (!findingsPath || !fs.existsSync(findingsPath)) { console.error('findings json required'); process.exit(1); }
 const data = JSON.parse(fs.readFileSync(findingsPath, 'utf8'));
+const originalScan = spawnSync(process.execPath, [path.join(__dirname, 'secret-scan.js'), findingsPath, '--redact-in-place'], { encoding: 'utf8' });
+if (![0, 2].includes(originalScan.status)) { console.error('findings redaction failed'); process.exit(2); }
+const sanitized = JSON.parse(fs.readFileSync(findingsPath, 'utf8'));
+for (const key of Object.keys(data)) delete data[key];
+Object.assign(data, sanitized);
 
 const ts = new Date().toISOString().replace(/[:]/g, '-').slice(0, 19);
 const reportDir = path.join(projectDir, '.qa', 'reports', ts);
@@ -19,45 +24,39 @@ fs.mkdirSync(reportDir, { recursive: true });
 
 const findings = data.findings || [];
 const sevCounts = findings.reduce((a, f) => { a[`sev${f.severity}`] = (a[`sev${f.severity}`] || 0) + 1; return a; }, {});
-const sevColor = { 1: '#c0392b', 2: '#e67e22', 3: '#f1c40f', 4: '#7f8c8d' };
+const sevColor = { 1: '#b52f27', 2: '#9b5100', 3: '#785a00', 4: '#526263' };
 const sevLabel = { 1: 'Sev 1 (block)', 2: 'Sev 2 (sprint)', 3: 'Sev 3 (backlog)', 4: 'Sev 4 (info)' };
 
-let coverageHtml = `
-  <ul>
-    <li>✓ Functional smoke (page loads, console errors, link integrity)</li>
-    <li>✓ Visual regression (deterministic, golden-anchored): <em>not yet implemented in v1.3 runtime; coming v1.4</em></li>
-    <li>✓ Accessibility (axe-core, WCAG 2.2 AA)</li>
-    <li>✓ Performance (Lighthouse): <em>not in smoke; run /qa:full</em></li>
-    <li>✗ Data correctness: <em>${data.data_adapter ? data.data_adapter : 'no adapter configured'}</em></li>
-  </ul>
-`;
+const coverage = data.coverage || {};
+const coverageHtml = '<ul>' + ['smoke_chromium', 'smoke_firefox', 'smoke_webkit', 'visual', 'performance', 'flows', 'data', 'oracle']
+  .map(layer => '<li>' + escapeHtml(layer.replace(/_/g, ' ')) + ': <strong>' + escapeHtml(coverage[layer] || 'not run') + '</strong></li>').join('') + '</ul>';
 
 let html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>qa-pro report — ${data.project}</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>qa-pro report — ${escapeHtml(data.project || "QA report")}</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; max-width: 980px; margin: 32px auto; padding: 0 24px; color: #2c3e50; }
   h1 { margin: 0 0 4px 0; font-size: 24px; }
-  .meta { color: #7f8c8d; font-size: 13px; margin-bottom: 24px; }
-  .summary { display: flex; gap: 12px; margin: 24px 0; }
+  .meta { overflow-wrap: anywhere; color: #54656c; font-size: 13px; margin-bottom: 24px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
   .pill { padding: 8px 12px; border-radius: 6px; color: white; font-weight: 600; font-size: 13px; }
   .coverage { background: #ecf0f1; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
   .coverage ul { margin: 8px 0 0 0; padding-left: 20px; }
   .coverage li { margin: 4px 0; font-size: 14px; }
-  .finding { border-left: 4px solid #bdc3c7; padding: 12px 16px; margin: 12px 0; background: #f8f9fa; border-radius: 0 4px 4px 0; }
+  .finding { border: 1px solid #bdc3c7; padding: 12px 16px; margin: 12px 0; background: #f8f9fa; border-radius: 0 4px 4px 0; }
   .finding.s1 { border-left-color: #c0392b; }
   .finding.s2 { border-left-color: #e67e22; }
   .finding.s3 { border-left-color: #f1c40f; }
-  .finding.s4 { border-left-color: #7f8c8d; }
+  .finding.s4 { border-left-color: #54656c; }
   .finding-h { font-weight: 600; margin-bottom: 4px; }
-  .finding-meta { font-size: 12px; color: #7f8c8d; margin-bottom: 8px; }
+  .finding-meta { font-size: 12px; color: #54656c; margin-bottom: 8px; }
   .finding-detail { font-size: 13px; color: #34495e; }
   .finding-detail pre { background: white; padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
-  .empty { text-align: center; padding: 48px; color: #7f8c8d; }
+  .empty { text-align: center; padding: 48px; color: #54656c; }
   .banner { background: #e74c3c; color: white; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; font-weight: 600; }
   .banner-warn { background: #f39c12; }
-</style></head><body>
+</style></head><body><main>
 <h1>qa-pro report</h1>
-<div class="meta">${data.project || 'unknown'} · ${data.test_url || ''} · ${data.startedAt} → ${data.finishedAt}</div>
+<div class="meta">${escapeHtml(data.project || 'unknown')} · ${escapeHtml(data.test_url || '')} · ${escapeHtml(data.startedAt || '')} → ${escapeHtml(data.finishedAt || '')}</div>
 
 <div class="coverage"><strong>Coverage</strong>${coverageHtml}</div>
 
@@ -65,21 +64,26 @@ let html = `<!DOCTYPE html>
 ${[1, 2, 3, 4].map(s => `<div class="pill" style="background: ${sevColor[s]}">${sevLabel[s]}: ${sevCounts['sev' + s] || 0}</div>`).join('')}
 </div>
 
-${findings.length === 0 ? '<div class="empty">No findings. Suite is clean.</div>' : ''}
+${findings.length === 0 ? '<div class="empty">No findings in completed checks. See coverage above.</div>' : ''}
 
 ${findings.map(f => `
 <div class="finding s${f.severity}">
-  <div class="finding-h">[Sev ${f.severity}] [${f.layer}] ${escapeHtml(f.finding)}</div>
-  <div class="finding-meta">page: ${escapeHtml(f.page || '')}${f.url ? ` · <a href="${escapeHtml(f.url)}">${escapeHtml(f.url)}</a>` : ''}</div>
-  ${f.detail ? `<div class="finding-detail"><pre>${escapeHtml(JSON.stringify(f.detail, null, 2))}</pre></div>` : ''}
+  <div class="finding-h">[Sev ${Number(f.severity)}] [${escapeHtml(f.layer)}] ${escapeHtml(f.finding)}</div>
+  <div class="finding-meta">page: ${escapeHtml(f.page || '')}${f.url ? ` · <a href="${escapeHtml(safeUrl(f.url))}">${escapeHtml(f.url)}</a>` : ''}</div>
+  ${f.detail ? `<div class="finding-detail"><pre tabindex="0" role="region" aria-label="Finding details">${escapeHtml(JSON.stringify(f.detail, null, 2))}</pre></div>` : ''}
 </div>
 `).join('')}
 
 <div class="meta" style="margin-top: 48px; padding-top: 16px; border-top: 1px solid #ecf0f1;">
-  Generated by qa-pro v1.3 · ${new Date().toISOString()}
+  Generated by qa-pro v${require('../package.json').version} · ${new Date().toISOString()}
 </div>
 
-</body></html>`;
+</main></body></html>`;
+
+function safeUrl(value) {
+  try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : '#'; }
+  catch { return '#'; }
+}
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -91,6 +95,7 @@ fs.writeFileSync(path.join(reportDir, 'findings.json'), JSON.stringify(data, nul
 
 // Run secret scan + redaction
 const scan = spawnSync('node', [path.join(__dirname, 'secret-scan.js'), indexPath, '--redact-in-place'], { encoding: 'utf8' });
+if (![0, 2].includes(scan.status)) { console.error('report redaction failed'); process.exit(2); }
 let scanResult = {};
 try { scanResult = JSON.parse(scan.stdout || '{}'); } catch {}
 

@@ -1,6 +1,6 @@
 {
   "name": "qa-pro-skill",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "description": "qa-pro skill helper deps (do not edit manually; use scripts/install-deps.sh)",
   "private": true,
   "dependencies": {
@@ -10,5 +10,8 @@
     "lighthouse": "^12.6.1",
     "pixelmatch": "^5.3.0",
     "pngjs": "^7.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.cjs"
   }
 }

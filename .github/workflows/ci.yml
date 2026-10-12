@@ -1,22 +1,29 @@
 name: CI
-
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
   workflow_dispatch:
-
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Config schema check
-        run: node scripts/validate-config.js templates/sample.yml
-      - name: Doctor check
-        run: node scripts/doctor.js
+      - run: npx playwright install chromium --with-deps
+      - name: Config schema checks
+        run: |
+          for config in templates/init-*.yml; do node scripts/validate-config.js "$config" >/dev/null; done
+      - name: Deterministic runtime and real browser regressions
+        run: npm test
+      - name: Installed tool health
+        run: node scripts/doctor.js "$GITHUB_WORKSPACE"

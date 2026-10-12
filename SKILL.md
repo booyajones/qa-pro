@@ -1,6 +1,6 @@
 ---
 name: qa-pro
-version: 1.1.0
+version: 1.4.0
 description: Universal QA, UAT, accessibility, performance, visual, and data-correctness testing for any web project. Triggers on QA testing, regression check, visual diff, accessibility audit, before deploy verification, after frontend changes, dashboard testing, chart number reconciliation, broken UI check, marketing site smoke, lighthouse audit, axe-core, WCAG, "test this site", "is the dashboard right", "before I ship", "QA my app". Project-agnostic. Runs under existing Claude Code subscription, no external infra.
 allowed-tools:
   - Bash
@@ -56,7 +56,7 @@ Goal: drop a working `.qa/config.yml` and oracle fixtures into the user's projec
 3. **Ask up to 3 questions:**
    - Q1: *"Project type? (1) static-site / marketing / blog  (2) spa-dashboard  (3) custom — pick number or describe"* (default = best guess from detection)
    - Q2: *"Does this page show numbers that come from somewhere you could re-query (a database, an API, a JSON file)? If yes, we'll set up a check that the displayed value matches the source. (yes / no / not sure → skip for now)"*
-   - Q3 (only if Q2=yes): *"Where does the data come from? (1) BigQuery (2) Postgres (3) REST API (4) GraphQL (5) JSON file"* — but only `jsonfile` and `rest` adapters are wired in v1.x; if user picks 1/2/4, say *"That adapter ships in v1.2+; falling back to no data correctness for now."*
+   - Q3 (only if Q2=yes): *"Where does the data come from? (1) BigQuery (2) Postgres (3) REST API (4) GraphQL (5) JSON file"* — but only `jsonfile` and `rest` adapters are wired in v1.x; if user picks 1/2/4, say *"That adapter is not implemented; choose a supported adapter or report data coverage as not configured."*
 4. **Print coverage matrix and confirm:**
    ```
    qa-pro will run these checks for this project:
@@ -223,7 +223,7 @@ User flow:
 
 ### Generating a CI gate workflow
 
-`node ~/.claude/skills/qa-pro/scripts/install-gate.js` detects platform:
+`node ~/.claude/skills/qa-pro/scripts/install-gate.js --ref <reviewed-40-char-sha>` detects platform:
 - **GitHub Actions:** writes `.github/workflows/qa-gate.yml` (runs on every PR, uploads report artifact)
 - **Vercel:** prints buildCommand pre-script
 - **Netlify:** prints netlify.toml snippet
@@ -276,3 +276,13 @@ No paging. Severity drives report ordering and color.
 - NEVER bypass the run-ID ledger gate when accepting a commit as source-of-truth.
 - NEVER delete `golden-at-creation.png` files programmatically. Only Jacob's PR (or the user's explicit manual delete) can rotate them.
 - NEVER auto-merge healer patches to `main` (this skill doesn't autonomous-heal in v1.x; bounded healing is a v2 feature).
+
+## Verified execution in v1.4.0
+
+Run `node scripts/full-runner.js <project-dir> --gate` for the complete configured gate. It executes smoke and accessibility in the requested browsers, visual comparisons, installed Lighthouse, actual Playwright critical flows, source-versus-rendered KPI checks, oracle checks and report generation. Required phase crashes and oracle failures block even if a stale baseline accepted the finding. `npm ci` installs the lockfile; install all requested Playwright engines explicitly. Reports show completed, failed, not configured and not run separately.
+
+Visual runs never create human-authored baselines. Approve independently captured fixtures before gating; missing baselines or immutable goldens block, and old machine-generated provenance is refused. Tests may create synthetic controls with synthetic provenance solely in temporary fixtures.
+
+The data runner supports `rest` and git-pinned `jsonfile` sources and visible selectors. Numeric formatting supports plain US grouping/currency and configured relative tolerance. Authentication is limited to supplied Playwright storage state for flows/data; validate your signed-in pages explicitly before relying on this layer. Other adapters are unavailable and must not be presented as covered.
+
+Use `install-gate.js <project-dir> --ref <reviewed-40-char-sha>` to generate a source-pinned, read-only GitHub gate. The workflow installs all three browser engines and calls the full runner. It does not start your application; configure a dedicated reachable test URL. Keep production data and credentials out of QA fixtures.
