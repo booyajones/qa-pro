@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const projectDir = process.argv[2] || process.cwd();
 const reportsDir = path.join(projectDir, '.qa', 'reports');
@@ -31,10 +31,9 @@ if (!fs.existsSync(indexPath)) {
 }
 
 console.log(`Opening: ${indexPath}`);
-const isWin = process.platform === 'win32';
-const isMac = process.platform === 'darwin';
-try {
-  if (isWin) execSync(`start "" "${indexPath}"`, { shell: true });
-  else if (isMac) execSync(`open "${indexPath}"`);
-  else execSync(`xdg-open "${indexPath}"`);
-} catch (e) { console.error(`could not auto-open: ${e.message}`); process.exit(1); }
+const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+const opened = spawnSync(command, [indexPath], { encoding: 'utf8' });
+if (opened.error || opened.status !== 0) {
+  console.error(`could not auto-open: ${opened.error?.message || opened.stderr || opened.status}`);
+  process.exitCode = 1;
+}

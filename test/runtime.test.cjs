@@ -80,8 +80,52 @@ test('both report JSON and uploaded findings are redacted and the coverage table
 test('missing Lighthouse category evidence blocks rather than reporting a clean performance phase', t => {
   const dir = project(t);
   const preload = path.join(dir, 'empty-lighthouse.cjs');
-  fs.writeFileSync(preload, `require('node:child_process').spawnSync=()=>({status:0,stdout:'{"categories":{}}',stderr:''});`);
+  fs.writeFileSync(preload, `require('node:child_process').execFile=(cmd,args,opts,callback)=>callback(null,'{"finalDisplayedUrl":"http://127.0.0.1:1/","categories":{}}','');`);
   const r = spawnSync(process.execPath, ['--require', preload, path.join(root, 'scripts/lighthouse-runner.js'), 'http://127.0.0.1:1'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).findings[0].severity, 1);
+});
+
+
+test('Lighthouse redirects cannot be filed as scores for the requested page', t => {
+  const dir = project(t);
+  const preload = path.join(dir, 'redirect-lighthouse.cjs');
+  const report = { finalDisplayedUrl: 'http://127.0.0.1:1/login', categories: Object.fromEntries(
+    ['performance', 'accessibility', 'best-practices', 'seo'].map(name => [name, { score: 1 }])) };
+  fs.writeFileSync(preload, `require('node:child_process').execFile=(cmd,args,opts,callback)=>callback(null,${JSON.stringify(JSON.stringify(report))},'');`);
+  const r = spawnSync(process.execPath, ['--require', preload, path.join(root, 'scripts/lighthouse-runner.js'), 'http://127.0.0.1:1/private'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(JSON.parse(r.stdout).findings[0].finding, /page was not tested/);
+});
+
+test('cookie template state resolves from the project root', t => {
+  const dir = project(t);
+  const config = path.join(dir, '.qa/config.yml');
+  fs.writeFileSync(config, 'name: auth\nproject_type: webapp-with-auth\ntest_url: http://127.0.0.1:1\nauth_cookie:\n  storage_state_file: .qa/auth/state.json\n');
+  const r = spawnSync(process.execPath, [path.join(root, 'scripts/validate-config.js'), config], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).storage_state, path.join(dir, '.qa/auth/state.json'));
+});
+
+test('report openers pass shell metacharacters as one literal path argument', t => {
+  const dir = project(t);
+  const tricky = path.join(dir, 'report $(touch unwanted) `echo unsafe`');
+  fs.mkdirSync(path.join(tricky, '.qa/reports/latest'), { recursive: true });
+  fs.writeFileSync(path.join(tricky, '.qa/reports/latest/index.html'), 'synthetic');
+  const input = path.join(tricky, '.qa/findings.json');
+  fs.writeFileSync(input, '{"findings":[]}');
+  const captured = path.join(dir, 'open.json');
+  const preload = path.join(dir, 'capture-open.cjs');
+  fs.writeFileSync(preload, `const cp=require('node:child_process'),original=cp.spawnSync;cp.spawnSync=(cmd,args,opts)=>{
+    if(['open','xdg-open','explorer.exe'].includes(cmd)){require('node:fs').writeFileSync(${JSON.stringify(captured)},JSON.stringify({cmd,args,opts}));return {status:0};}
+    return original(cmd,args,opts);
+  };`);
+  for (const args of [[path.join(root, 'scripts/open-report.js'), tricky], [path.join(root, 'scripts/build-report.js'), input, tricky, '--open']]) {
+    const r = spawnSync(process.execPath, ['--require', preload, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const call = JSON.parse(fs.readFileSync(captured));
+    assert.equal(call.args.length, 1);
+    assert.ok(call.args[0].startsWith(tricky + path.sep));
+    assert.equal(call.opts.shell, undefined);
+  }
 });

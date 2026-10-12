@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Lighthouse perf module for /qa:full
-// Usage: node lighthouse-runner.js <test-url> [<page-paths-json>]
+// Usage: node lighthouse-runner.js <test-url> [<page-paths-json>] [<config-json-path>]
 // Outputs JSON findings with severity per perf budget.
 
-const { spawnSync } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 const testUrl = process.argv[2];
 const pagesJson = process.argv[3] || '["/"]';
@@ -14,16 +16,30 @@ const pages = JSON.parse(pagesJson);
 const skillDir = path.join(__dirname, '..');
 const findings = [];
 
+(async () => {
+let context, profile;
+try {
+  const authArgs = [];
+  const state = process.argv[4] && JSON.parse(fs.readFileSync(process.argv[4], 'utf8')).storage_state;
+  if (state) {
+    profile = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-pro-lighthouse-'));
+    // Use an isolated default context: Lighthouse cannot see Playwright incognito contexts.
+    context = await require('playwright').chromium.launchPersistentContext(profile, { args: ['--remote-debugging-port=0'] });
+    await context.setStorageState(state);
+    const port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
+    authArgs.push(`--port=${port}`, '--disable-storage-reset');
+  }
 for (const p of pages) {
   const url = new URL(p, testUrl).toString();
   console.error(`Lighthouse: ${url}`);
 
   // Use the lockfile's installed version and argv, never a shell or @latest.
-  const result = spawnSync(process.execPath, [path.join(skillDir, 'node_modules/lighthouse/cli/index.js'), url, '--output=json', '--chrome-flags=--headless --no-sandbox', '--quiet', '--only-categories=performance,accessibility,best-practices,seo'], {
+  const result = await new Promise(resolve => execFile(process.execPath, [path.join(skillDir, 'node_modules/lighthouse/cli/index.js'), url, '--output=json', '--chrome-flags=--headless --no-sandbox', '--quiet', ...authArgs, '--only-categories=performance,accessibility,best-practices,seo'], {
     encoding: 'utf8',
     cwd: skillDir,
     timeout: 90000,
-  });
+    maxBuffer: 50 * 1024 * 1024,
+  }, (error, stdout, stderr) => resolve({ status: error ? 1 : 0, stdout, stderr: stderr || error?.message || '' })));
 
   if (result.status !== 0) {
     findings.push({ severity: 1, layer: 'perf', page: p, finding: `lighthouse failed: ${(result.stderr || '').slice(0, 200)}`, url });
@@ -33,6 +49,12 @@ for (const p of pages) {
   let lh;
   try { lh = JSON.parse(result.stdout); } catch { findings.push({ severity: 1, layer: 'perf', page: p, finding: 'lighthouse output unparseable', url }); continue; }
 
+  const landedUrl = lh.finalDisplayedUrl || lh.finalUrl;
+  const asked = new URL(url), landed = landedUrl && new URL(landedUrl);
+  if (!landed || asked.origin !== landed.origin || asked.pathname.replace(/\/$/, '') !== landed.pathname.replace(/\/$/, '')) {
+    findings.push({ severity: 1, layer: 'perf', page: p, finding: `Lighthouse page was not tested: landed on ${landedUrl || 'unknown URL'}`, url });
+    continue;
+  }
   const cats = lh.categories || {};
   if (lh.runtimeError || ['performance', 'accessibility', 'best-practices', 'seo'].some(name =>
       typeof cats[name]?.score !== 'number' || cats[name].score < 0 || cats[name].score > 1)) {
@@ -69,5 +91,9 @@ for (const p of pages) {
   if (tbt && tbt > 200) findings.push({ severity: tbt > 600 ? 2 : 3, layer: 'perf', page: p, finding: `TBT ${tbt.toFixed(0)}ms (>200ms)`, url });
 }
 
+} finally {
+  if (context) await context.close();
+  if (profile) fs.rmSync(profile, { recursive: true, force: true });
+}
 console.log(JSON.stringify({ layer: 'lighthouse', findings }, null, 2));
-process.exit(0);
+})().catch(e => { console.error(e.message); process.exitCode = 1; });

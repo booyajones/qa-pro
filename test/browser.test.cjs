@@ -27,8 +27,8 @@ async function fixture(t) {
   write();
   return { dir, config, configPath, write };
 }
-async function run(script, args) {
-  const r = await exec(process.execPath, [path.join(root, 'scripts', script), ...args], { timeout: 45000, maxBuffer: 10 * 1024 * 1024 });
+async function run(script, args, timeout = 45000) {
+  const r = await exec(process.execPath, [path.join(root, 'scripts', script), ...args], { timeout, maxBuffer: 10 * 1024 * 1024 });
   return JSON.parse(r.stdout);
 }
 
@@ -89,4 +89,47 @@ test('an approved synthetic golden passes and a corrupted golden blocks without 
   fs.writeFileSync(golden, bytes);
   assert.ok((await run('visual-runner.js', [f.dir, f.configPath])).findings.some(f => f.severity === 1 && /immutable golden/.test(f.finding)));
   assert.deepEqual(fs.readFileSync(golden), bytes);
+});
+
+
+test('smoke, visual and Lighthouse restore cookie plus localStorage auth and reject a login redirect', async t => {
+  const f = await fixture(t);
+  let signedInHits = 0;
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/private' && !/qa_session=synthetic/.test(req.headers.cookie || '')) {
+      res.writeHead(302, { Location: '/login' }); res.end(); return;
+    }
+    if (req.url === '/signed-in') { signedInHits++; res.end('ok'); return; }
+    res.end('<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed in fixture</title></head><body><main><h1>' +
+      (req.url === '/private' ? 'Private dashboard' : 'Login') + '</h1></main>' +
+      (req.url === '/private' ? '<script>if(localStorage.getItem("qa_token")!=="synthetic"){location.replace("/login")}else{fetch("/signed-in")}</script>' : '') + '</body></html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  f.config.test_url = `http://127.0.0.1:${server.address().port}`;
+  f.config.pages = ['/private']; f.write();
+  const anonymousSmoke = await run('smoke-runner.js', [f.configPath]);
+  assert.ok(anonymousSmoke.findings.some(f => f.severity === 1 && /landed on .*login/.test(f.finding)));
+  const anonymousVisual = await run('visual-runner.js', [f.dir, f.configPath]);
+  assert.ok(anonymousVisual.findings.some(f => f.severity === 1 && /page was not tested/.test(f.finding)));
+  const anonymousPerf = await run('lighthouse-runner.js', [f.config.test_url, JSON.stringify(f.config.pages)], 120000);
+  assert.ok(anonymousPerf.findings.some(f => f.severity === 1 && /page was not tested/.test(f.finding)));
+  const state = { cookies: [{ name: 'qa_session', value: 'synthetic', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }],
+    origins: [{ origin: f.config.test_url, localStorage: [{ name: 'qa_token', value: 'synthetic' }] }] };
+  f.config.storage_state = path.join(f.dir, 'synthetic-state.json');
+  fs.writeFileSync(f.config.storage_state, JSON.stringify(state)); f.write();
+  const smoke = await run('smoke-runner.js', [f.configPath]);
+  assert.ok(!smoke.findings.some(f => /landed on|navigation failed/.test(f.finding)));
+  assert.ok(signedInHits > 0);
+  await run('visual-runner.js', [f.dir, f.configPath]);
+  const fixtures = path.join(f.dir, '.qa/fixtures/good/private/desktop');
+  const current = fs.readFileSync(path.join(fixtures, 'current.png'));
+  for (const name of ['baseline.png', 'golden-at-creation.png']) fs.writeFileSync(path.join(fixtures, name), current);
+  fs.writeFileSync(path.join(fixtures, 'meta.json'), JSON.stringify({ source_type: 'bug_ticket', source_ref: 'temporary synthetic auth regression control' }));
+  assert.deepEqual((await run('visual-runner.js', [f.dir, f.configPath])).findings, []);
+  const before = signedInHits;
+  const perf = await run('lighthouse-runner.js', [f.config.test_url, JSON.stringify(f.config.pages), f.configPath], 120000);
+  assert.ok(!perf.findings.some(f => f.severity === 1), JSON.stringify(perf));
+  assert.ok(signedInHits > before, 'actual Lighthouse navigation reached the cookie and localStorage protected page');
 });

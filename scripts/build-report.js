@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const findingsPath = process.argv[2];
 const projectDir = process.argv[3] || process.cwd();
@@ -102,11 +102,10 @@ try { scanResult = JSON.parse(scan.stdout || '{}'); } catch {}
 console.log(JSON.stringify({ report: indexPath, secret_scan: scanResult, sevCounts, total_findings: findings.length }, null, 2));
 
 if (shouldOpen) {
-  const isWin = process.platform === 'win32';
-  const isMac = process.platform === 'darwin';
-  try {
-    if (isWin) execSync(`start "" "${indexPath}"`, { shell: true });
-    else if (isMac) execSync(`open "${indexPath}"`);
-    else execSync(`xdg-open "${indexPath}"`);
-  } catch (e) { console.error(`could not auto-open: ${e.message}`); }
+  const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const opened = spawnSync(command, [indexPath], { encoding: 'utf8' });
+  if (opened.error || opened.status !== 0) {
+    console.error(`could not auto-open: ${opened.error?.message || opened.stderr || opened.status}`);
+    process.exitCode = 1;
+  }
 }

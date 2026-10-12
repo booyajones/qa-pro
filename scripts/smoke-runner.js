@@ -46,6 +46,7 @@ const LANDED_SETTLE_MS = 500;
     viewport: { width: 1440, height: 900 },
     userAgent: 'qa-pro-smoke/1.4',
     reducedMotion: 'reduce',
+    storageState: cfg.storage_state,
   });
 
   // Determinism: freeze Date.now and Math.random

@@ -30,6 +30,7 @@ async function deterministicContext(browser, viewportName) {
     viewport: VIEWPORTS[viewportName] || VIEWPORTS.desktop,
     userAgent: 'qa-pro-visual/1.4',
     reducedMotion: 'reduce',
+    storageState: cfg.storage_state,
   });
   await ctx.addInitScript(() => {
     const epoch = 1767225600000;
@@ -74,7 +75,14 @@ async function deterministicContext(browser, viewportName) {
       const metaFile = path.join(fxDir, 'meta.json');
 
       try {
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+        const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.waitForTimeout(500);
+        const landed = new URL(page.url()), asked = new URL(url);
+        if (!response?.ok() || asked.origin !== landed.origin || asked.pathname.replace(/\/$/, '') !== landed.pathname.replace(/\/$/, '')) {
+          findings.push({ severity: 1, layer: 'visual', page: pPath, viewport,
+            finding: `visual page was not tested: returned ${response?.status()} at ${page.url()}`, url });
+          continue;
+        }
       } catch (e) {
         findings.push({ severity: 2, layer: 'visual', page: pPath, viewport, finding: `nav failed for visual check: ${e.message}`, url });
         continue;

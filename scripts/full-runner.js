@@ -73,7 +73,7 @@ coverage.visual = visual.coverage || 'completed';
 
 // Lighthouse phase
 const lighthouse = step('lighthouse (perf + a11y + best-practices + SEO)', () => {
-  const r = spawnSync('node', [path.join(__dirname, 'lighthouse-runner.js'), cfg.test_url, JSON.stringify(cfg.pages)], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+  const r = spawnSync('node', [path.join(__dirname, 'lighthouse-runner.js'), cfg.test_url, JSON.stringify(cfg.pages), cfgJsonPath], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
   if (r.status !== 0) throw new Error(r.stderr.split('\n')[0] || 'unknown');
   return JSON.parse(r.stdout);
 });

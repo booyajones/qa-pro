@@ -39,6 +39,10 @@ if (cfg.data_adapter && !['jsonfile', 'rest', 'postgres', 'graphql', 'bigquery',
 if (!Array.isArray(cfg.pages) || !cfg.pages.length) cfg.pages = ['/'];
 if (!Array.isArray(cfg.viewports) || !cfg.viewports.length) cfg.viewports = ['desktop'];
 
+// Normalize the cookie template and relative paths once for every phase.
+cfg.storage_state = cfg.storage_state || cfg.auth_cookie?.storage_state_file;
+if (typeof cfg.storage_state === 'string') cfg.storage_state = path.resolve(path.dirname(configPath), '..', cfg.storage_state);
+
 cfg.monthly_token_cap = cfg.monthly_token_cap || 2000000;
 cfg.per_run_token_cap = cfg.per_run_token_cap || 500000;
 cfg.vision_call_cap_per_full = cfg.vision_call_cap_per_full || 30;
