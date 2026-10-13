@@ -56,6 +56,7 @@ test('the generated gate invokes every configured layer and uploads findings', t
   assert.match(workflow, /npm ci/);
   assert.match(workflow, new RegExp('a'.repeat(40)));
   assert.match(workflow, /chromium firefox webkit/);
+  assert.doesNotMatch(workflow, /validate-config\.js.*>.*config\.json/);
 });
 
 test('both report JSON and uploaded findings are redacted and the coverage table makes no unrun claim', t => {
@@ -128,4 +129,29 @@ test('report openers pass shell metacharacters as one literal path argument', t 
     assert.ok(call.args[0].startsWith(tricky + path.sep));
     assert.equal(call.opts.shell, undefined);
   }
+});
+
+test('inline auth config cache is private and replaces symlinks without touching their targets', t => {
+  const dir = project(t);
+  const config = path.join(dir, '.qa/config.yml'), cache = path.join(dir, '.qa/config.json');
+  const token = 'QA_SYNTHETIC_COOKIE_MARKER';
+  fs.chmodSync(dir, 0o755); fs.chmodSync(path.join(dir, '.qa'), 0o755);
+  fs.writeFileSync(config, `name: auth\nproject_type: custom\ntest_url: http://127.0.0.1:1\nstorage_state:\n  cookies:\n    - name: session\n      value: ${token}\n  origins: []\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(dir, '.qa/oracle_failed.flag'), 'synthetic stop control');
+  const run = () => {
+    const r = spawnSync(process.execPath, [path.join(root, 'scripts/full-runner.js'), dir], { encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(!r.stdout.includes(token) && !r.stderr.includes(token));
+    assert.equal(JSON.parse(fs.readFileSync(cache)).storage_state.cookies[0].value, token);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(cache).mode & 0o777, 0o600);
+    assert.ok(!fs.readdirSync(path.join(dir, '.qa')).some(name => name.startsWith('.config-')));
+  };
+  run();
+  fs.chmodSync(cache, 0o644);
+  run();
+  const target = path.join(dir, 'untouched-target');
+  fs.writeFileSync(target, 'synthetic target sentinel'); fs.unlinkSync(cache); fs.symlinkSync(target, cache);
+  run();
+  assert.equal(fs.lstatSync(cache).isSymbolicLink(), false);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'synthetic target sentinel');
 });

@@ -68,7 +68,6 @@ jobs:
       - name: Run qa-pro gate
         run: |
           cd ~/.claude/skills/qa-pro/scripts
-          node validate-config.js \${{ github.workspace }}/.qa/config.yml > \${{ github.workspace }}/.qa/config.json
           node full-runner.js \${{ github.workspace }} --gate
 
       - name: Upload report

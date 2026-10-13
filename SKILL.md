@@ -276,7 +276,7 @@ No paging. Severity drives report ordering and color.
 
 ## Verified execution in v1.4.0
 
-Run `node scripts/full-runner.js <project-dir> --gate` for the complete configured gate. It executes smoke and accessibility in the requested browsers, visual comparisons, installed Lighthouse, actual Playwright critical flows, source-versus-rendered KPI checks, oracle checks and report generation. Required phase crashes and oracle failures block even if a stale baseline accepted the finding. `npm ci` installs the lockfile; install all requested Playwright engines explicitly. Reports show completed, failed, not configured and not run separately.
+Run `node scripts/full-runner.js <project-dir> --gate` for the complete configured gate. It executes smoke and accessibility in the requested browsers, visual comparisons, installed Lighthouse, actual Playwright critical flows, source-versus-rendered KPI checks, oracle checks and report generation. Required phase crashes and oracle failures block even if a stale baseline accepted the finding. `npm ci` installs the lockfile; install all requested Playwright engines explicitly. Reports show completed, failed, not configured and not run separately. The normalized `.qa/config.json` cache can contain supplied authentication state; it is atomically replaced with mode `0600` and gitignored by init. Keep source credentials and caches out of version control.
 
 Visual runs never create human-authored baselines. Approve independently captured fixtures before gating; missing baselines or immutable goldens block, and old machine-generated provenance is refused. Tests may create synthetic controls with synthetic provenance solely in temporary fixtures.
 

@@ -38,7 +38,13 @@ const validate = spawnSync('node', [path.join(__dirname, 'validate-config.js'), 
 if (validate.status !== 0) { console.error(`Config invalid: ${validate.stderr}`); process.exit(1); }
 
 const cfgJsonPath = path.join(projectDir, '.qa', 'config.json');
-fs.writeFileSync(cfgJsonPath, validate.stdout);
+// Replace the path, never follow an old symlink or retain a public file mode.
+const configTemp = fs.mkdtempSync(path.join(projectDir, '.qa', '.config-'));
+try {
+  const privateConfig = path.join(configTemp, 'config.json');
+  fs.writeFileSync(privateConfig, validate.stdout, { mode: 0o600, flag: 'wx' });
+  fs.renameSync(privateConfig, cfgJsonPath);
+} finally { fs.rmSync(configTemp, { recursive: true, force: true }); }
 const cfg = JSON.parse(validate.stdout);
 
 // Check oracle stop-flag
