@@ -12,11 +12,7 @@ function fail(msg) { console.error(`qa-pro config error: ${msg}`); process.exit(
 const skillDir = path.join(__dirname, '..');
 function ensure(pkg) {
   try { return require(path.join(skillDir, 'node_modules', pkg)); }
-  catch {
-    console.error(`(installing ${pkg}...)`);
-    execSync(`npm install --no-save --prefix "${skillDir}" ${pkg}`, { stdio: 'inherit' });
-    return require(path.join(skillDir, 'node_modules', pkg));
-  }
+  catch { fail(`missing ${pkg}; install this reviewed skill with npm ci`); }
 }
 const yaml = ensure('js-yaml');
 
@@ -42,6 +38,10 @@ if (cfg.data_adapter && !['jsonfile', 'rest', 'postgres', 'graphql', 'bigquery',
 
 if (!Array.isArray(cfg.pages) || !cfg.pages.length) cfg.pages = ['/'];
 if (!Array.isArray(cfg.viewports) || !cfg.viewports.length) cfg.viewports = ['desktop'];
+
+// Normalize the cookie template and relative paths once for every phase.
+cfg.storage_state = cfg.storage_state || cfg.auth_cookie?.storage_state_file;
+if (typeof cfg.storage_state === 'string') cfg.storage_state = path.resolve(path.dirname(configPath), '..', cfg.storage_state);
 
 cfg.monthly_token_cap = cfg.monthly_token_cap || 2000000;
 cfg.per_run_token_cap = cfg.per_run_token_cap || 500000;

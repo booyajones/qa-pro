@@ -9,8 +9,7 @@ set -e
 
 TEST_URL="${1:-https://chriswyatt.dev}"
 SKILL_DIR="$HOME/.claude/skills/qa-pro"
-TEST_PROJECT_RAW="${TMPDIR:-$HOME/Downloads}/qa-pro-selftest-$(date +%s)"
-mkdir -p "$TEST_PROJECT_RAW"
+TEST_PROJECT_RAW="$(mktemp -d "${TMPDIR:-$HOME/Downloads}/qa-pro-selftest-XXXXXX")"
 # On Git-Bash-for-Windows, Node is a native Windows binary and needs Windows-style paths.
 # cygpath converts /c/... → C:\... so Node doesn't double the drive letter.
 if command -v cygpath >/dev/null 2>&1; then
@@ -34,7 +33,9 @@ node "$SKILL_DIR_W/scripts/init.js" "$TEST_PROJECT" --url "$TEST_URL" --type sta
 echo
 
 echo "Step 2/4: doctor (post-init; allow yellow, fail on red)"
+set +e
 node "$SKILL_DIR_W/scripts/doctor.js" "$TEST_PROJECT"; DOCTOR_RC=$?
+set -e
 if [ "$DOCTOR_RC" -gt 1 ]; then
   echo "FAIL: doctor reported red rows (rc=$DOCTOR_RC)"
   exit 1
